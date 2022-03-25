@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 import os
 import argparse
@@ -26,7 +28,7 @@ import numpy
 import json
 from torchvision import transforms
 from detecto.utils import normalize_transform
-
+import torch
 def get_args():
     """Get command-line arguments"""
 
@@ -158,6 +160,7 @@ def create_labels(data,test,train,val):
 
 def main():
     args = get_args()
+    torch.cuda.empty_cache()
     labels = get_labels(args.json)
     train, val, test, img_dict = split_data(labels)
     inv_dict = {v: k for k, v in img_dict.items()}
@@ -185,18 +188,27 @@ def main():
     loader = core.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     fileName+= "epochs" + str(args.epoch) + "learn_rate" + str(args.learning_rate);
     val_dataset = core.Dataset('lettuce_object_detection/val')
-    if(os.exist(fileName)):
-        model = core.Model.load(fileName +"/"+fileName +".pth",['whole_plant', 'edge_plant'])
+    if(os.path.isdir(fileName)):
+        model = core.Model.load(os.path.join(fileName, fileName +".pth"),['whole_plant', 'edge_plant'])
     else:
         model = core.Model(['whole_plant', 'edge_plant'])
     #model = core.Model(['plant'])
     losses = model.fit(loader, val_dataset, epochs=args.epoch, learning_rate=args.learning_rate, verbose=True)
-    model.save(fileName);
+    
+    # Check and see if the main output dir is there for this run, if not add it
+    if not os.path.isdir(fileName):
+        os.mkdir(fileName)
+
+    
+    model.save(os.path.join(fileName, fileName+'.pth'));
     plt.plot(losses)
     plt.title('Faster R-CNN losses')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
+
     plt.savefig(fileName +"/"+fileName+'.png')
     plt.show()
 
-    
+# --------------------------------------------------
+if __name__ == '__main__':
+    main()    
