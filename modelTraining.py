@@ -81,6 +81,13 @@ def get_args():
 def get_labels(json_path):
     labels = open(json_path);
     labels = json.loads(labels.read());
+    if type(labels) != list:
+        
+        new_labels = []
+        for i in labels:
+            new_labels.append(labels[i])
+
+        labels = new_labels
     return labels;
 
 def download_set(work_path, set_list, img_dict):
@@ -101,7 +108,17 @@ def download_set(work_path, set_list, img_dict):
       sp.call(f'wget "{url}" -O {os.path.join(work_path, item)}', shell=True) 
 #-------------------------------------------------------------------------------
 
-def split_data(labels): 
+def split_data(labels):
+
+
+  if type(labels) != list:
+    
+    new_labels = []
+    for i in labels:
+        new_labels.append(labels[i])
+
+    labels = new_labels
+
 
   img_list = [item['Labeled Data'] for item in labels if item['Skipped']==False]
   name_list = [item['External ID'] for item in labels if item['Skipped']==False]
@@ -116,7 +133,9 @@ def create_labels(data,test,train,val):
   
 
     for i in range(len(data)):
+        # print(i)
         try:
+            # print(data)
             file_name = data[i]['External ID'].replace('.png', '.txt')
             name = data[i]['External ID']
             out_name = name.replace('.png', '.xml')
@@ -127,7 +146,7 @@ def create_labels(data,test,train,val):
 
             elif name in train: 
                 file_type = 'train'
-          
+            
             else:
                 file_type = 'val'
 
@@ -144,7 +163,7 @@ def create_labels(data,test,train,val):
             final = list(zip(label_list, x, y))
             if not final:
                 print('empty')
-              
+                
             name = os.path.join('lettuce_object_detection', file_type, name)
             writer = Writer(name, w, h)
             for item in final:
@@ -153,22 +172,49 @@ def create_labels(data,test,train,val):
                 min_y, max_y = item[2]
                 writer.addObject(item[0], min_x, min_y, max_x, max_y)
             writer.save(os.path.join('lettuce_object_detection', file_type, out_name))
+            print('successfuly created label')
         except:
             pass
 
-        print('Done creating labels.')
+    print('Done creating labels.')
 
 def main():
     args = get_args()
     torch.cuda.empty_cache()
     labels = get_labels(args.json)
+
+    # dynamically populate training labels
+
+    label_options = [
+    ]
+
+    for i in labels:
+        try:
+            for z in i['Label']['objects']:
+                label_options.append(z['value'])
+        except:
+            pass
+
+
+
+    label_options = list(set(label_options))
+
+    print(label_options)
+
+
+    # print(labels[0]['Label']['objects'][0]['value'])
     train, val, test, img_dict = split_data(labels)
+
+
     inv_dict = {v: k for k, v in img_dict.items()}
     if(not(os.path.exists('lettuce_object_detection/train'))):
         download_set ('lettuce_object_detection/train', train, img_dict)
         download_set ('lettuce_object_detection/val', val, img_dict)
         download_set ('lettuce_object_detection/test', test, img_dict)
         create_labels(labels,test,train,val)
+
+
+
     fileName = ""
     transformList = [transforms.ToPILImage()]
     if(args.randH):
@@ -185,13 +231,17 @@ def main():
     if(fileName == ""):
         fileName = "NoTransforms"
     dataset = core.Dataset('lettuce_object_detection/train',transform= t)
+
+    print(len(dataset))
     loader = core.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    fileName+= "epochs" + str(args.epoch) + "learn_rate" + str(args.learning_rate);
+
+    input_json_name = os.path.basename(args.json).replace('.json', '')
+    fileName+= "epochs" + str(args.epoch) + "learn_rate" + str(args.learning_rate)+ '_' + input_json_name;
     val_dataset = core.Dataset('lettuce_object_detection/val')
     if(os.path.isdir(fileName)):
         model = core.Model.load(os.path.join(fileName, fileName +".pth"),['whole_plant', 'edge_plant'])
     else:
-        model = core.Model(['whole_plant', 'edge_plant'])
+        model = core.Model(label_options)
     #model = core.Model(['plant'])
     losses = model.fit(loader, val_dataset, epochs=args.epoch, learning_rate=args.learning_rate, verbose=True)
     
