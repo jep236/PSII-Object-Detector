@@ -34,7 +34,7 @@ def main():
     for i in training_jsons:
         for y in grid_yaml['epochs']:
             for z in grid_yaml['learning_rates']:
-                subprocess.run(['python3', 'modelTraining.py', '-j', i, '-e', str(y), '-lr', str(z), '-b', str(2)])
+                subprocess.run(['python3', 'modelTraining.py', '-j', i, '-e', str(y), '-lr', str(z), '-b', str(1)])
     # subprocess.run(['ls'])
 
 

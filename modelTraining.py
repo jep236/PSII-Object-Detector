@@ -29,6 +29,7 @@ import json
 from torchvision import transforms
 from detecto.utils import normalize_transform
 import torch
+# from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 def get_args():
     """Get command-line arguments"""
 
@@ -60,6 +61,14 @@ def get_args():
                         help='Decides the number of images processed before updating the model.',
                         type=int,
                         default=3)
+
+    parser.add_argument('-t',
+                        '--training_dir',
+                        help='Decides the number of images processed before updating the model.',
+                        type=str,
+                        default='sorghum_object_detection')
+
+
     parser.add_argument('-th',
                         '--randH',
                         help='Decides the likehood of a random horizontal tranformation.',
@@ -130,58 +139,67 @@ def split_data(labels):
   return train, val, test, img_dict
     
 def create_labels(data,test,train,val):
+    print('creating labels')
   
 
     for i in range(len(data)):
         # print(i)
-        try:
+        # try:
             # print(data)
-            file_name = data[i]['External ID'].replace('.png', '.txt')
-            name = data[i]['External ID']
-            out_name = name.replace('.png', '.xml')
-            print(f'Creating {out_name}.')
+        file_name = data[i]['External ID'].replace('.png', '.txt')
+        name = data[i]['External ID']
+        out_name = name.replace('.png', '.xml')
+        print(f'Creating {out_name}.')
 
-            if name in test:
-                file_type = 'test'
+        if name in test:
+            file_type = 'test'
 
-            elif name in train: 
-                file_type = 'train'
+        elif name in train: 
+            file_type = 'train'
+        
+        else:
+            file_type = 'val'
+
+        img = cv2.imread(os.path.join(training_dir, file_type, name))
+
+        h, w, _ = img.shape
+        label_list, x, y = [], [], []
+        for a in range(len(data[i]['Label']['objects'])):  
+            points = data[i]['Label']['objects'][a]['bbox']
+            label = data[i]['Label']['objects'][a]['value']
+            label_list.append(label)
+            x.append([points['left'], (points['left'] + points['width'])])
+            y.append([points['top'], (points['top'] + points['height'])])
+        final = list(zip(label_list, x, y))
+        if not final:
+            print('empty')
             
-            else:
-                file_type = 'val'
+        name = os.path.join(training_dir, file_type, name)
+        writer = Writer(name, w, h)
+        for item in final:
 
-            img = cv2.imread(os.path.join('lettuce_object_detection', file_type, name))
-
-            h, w, _ = img.shape
-            label_list, x, y = [], [], []
-            for a in range(len(data[i]['Label']['objects'])):  
-                points = data[i]['Label']['objects'][a]['bbox']
-                label = data[i]['Label']['objects'][a]['value']
-                label_list.append(label)
-                x.append([points['left'], (points['left'] + points['width'])])
-                y.append([points['top'], (points['top'] + points['height'])])
-            final = list(zip(label_list, x, y))
-            if not final:
-                print('empty')
-                
-            name = os.path.join('lettuce_object_detection', file_type, name)
-            writer = Writer(name, w, h)
-            for item in final:
-
-                min_x, max_x = item[1]
-                min_y, max_y = item[2]
-                writer.addObject(item[0], min_x, min_y, max_x, max_y)
-            writer.save(os.path.join('lettuce_object_detection', file_type, out_name))
-            print('successfuly created label')
-        except:
-            pass
+            min_x, max_x = item[1]
+            min_y, max_y = item[2]
+            writer.addObject(item[0], min_x, min_y, max_x, max_y)
+        writer.save(os.path.join(training_dir, file_type, out_name))
+        print('successfuly created label')
+        # except:
+        #     pass
 
     print('Done creating labels.')
 
 def main():
+    global args
     args = get_args()
     torch.cuda.empty_cache()
+
+
+
     labels = get_labels(args.json)
+
+    # be able to make different training sets
+    global training_dir
+    training_dir = args.training_dir
 
     # dynamically populate training labels
 
@@ -195,9 +213,13 @@ def main():
         except:
             pass
 
+    
 
 
     label_options = list(set(label_options))
+    # label_options = label_options.sort()
+
+    training_dir = training_dir + '_' + '_'.join(label_options)
 
     print(label_options)
 
@@ -207,10 +229,10 @@ def main():
 
 
     inv_dict = {v: k for k, v in img_dict.items()}
-    if(not(os.path.exists('lettuce_object_detection/train'))):
-        download_set ('lettuce_object_detection/train', train, img_dict)
-        download_set ('lettuce_object_detection/val', val, img_dict)
-        download_set ('lettuce_object_detection/test', test, img_dict)
+    if not(os.path.exists(os.path.join(training_dir, 'train'))):
+        download_set(os.path.join(training_dir, 'train'), train, img_dict)
+        download_set(os.path.join(training_dir, 'val'), val, img_dict)
+        download_set(os.path.join(training_dir, 'test'), test, img_dict)
         create_labels(labels,test,train,val)
 
 
@@ -230,19 +252,31 @@ def main():
     t = transforms.Compose(transformList);
     if(fileName == ""):
         fileName = "NoTransforms"
-    dataset = core.Dataset('lettuce_object_detection/train',transform= t)
 
+
+    dataset = core.Dataset(os.path.join('.', training_dir, 'train'),transform= t)
+    print(os.path.join(training_dir, 'train'))
     print(len(dataset))
     loader = core.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     input_json_name = os.path.basename(args.json).replace('.json', '')
     fileName+= "epochs" + str(args.epoch) + "learn_rate" + str(args.learning_rate)+ '_' + input_json_name;
-    val_dataset = core.Dataset('lettuce_object_detection/val')
+    val_dataset = core.Dataset(os.path.join(training_dir, 'val'))
+
+    # we do not want to try and double train a model so if we find the directory we will raise an error
     if(os.path.isdir(fileName)):
-        model = core.Model.load(os.path.join(fileName, fileName +".pth"),['whole_plant', 'edge_plant'])
+        raise ValueError(('You have allready trained a model with these parameters'))
     else:
-        model = core.Model(label_options)
-    #model = core.Model(['plant'])
+        # we are getting an error when switching to different tags
+        try:
+
+            model = core.Model(label_options)
+        except:
+            create_labels(labels,test,train,val)
+            model = core.Model(label_options)
+
+
+    # model = model.get_internal_model()
     losses = model.fit(loader, val_dataset, epochs=args.epoch, learning_rate=args.learning_rate, verbose=True)
     
     # Check and see if the main output dir is there for this run, if not add it
@@ -257,8 +291,20 @@ def main():
     plt.ylabel('Loss')
 
     plt.savefig(fileName +"/"+fileName+'.png')
-    plt.show()
+    try:
+        images = []
+        for i in range(4):
+            image, _ = val_dataset[i]
+            images.append(image)
 
+        top_predictions = model.predict_top(images)
+        cnt2 =0
+        for i in top_predictions:
+            plt.plot(i)
+            plt.savefig(filename+'/'+filename+'_predction'+str(cnt2)+'.png')
+            cnt2+=1
+    except:
+        pass
 # --------------------------------------------------
 if __name__ == '__main__':
     main()    
