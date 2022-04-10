@@ -1,0 +1,6 @@
+training_json_directory: '/home/travis/repos/PSII-Object-Detector/training_jsons'
+
+epochs: [30]
+
+learning_rates: [0.01, 0.005, 0.001]
+
